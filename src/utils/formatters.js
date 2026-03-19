@@ -3,18 +3,31 @@ const journeyStageOrder = ["Trigger", "Explore", "Decide", "Use", "Reflect"]
 const stageAliases = {
   trigger: "Trigger",
   awareness: "Trigger",
+  identify: "Trigger",
   explore: "Explore",
   discovery: "Explore",
+  research: "Explore",
+  evaluate: "Explore",
+  comparison: "Explore",
+  compare: "Explore",
   consider: "Decide",
   decision: "Decide",
   decide: "Decide",
   choose: "Decide",
+  select: "Decide",
+  purchase: "Decide",
+  buy: "Decide",
   onboarding: "Use",
   use: "Use",
   adopt: "Use",
+  activate: "Use",
+  implementation: "Use",
+  execute: "Use",
   retention: "Reflect",
   reflect: "Reflect",
   review: "Reflect",
+  advocacy: "Reflect",
+  renew: "Reflect",
 }
 
 const emotionLabelMap = [
@@ -92,16 +105,29 @@ export function normalizeJourneyMap(journeyMap) {
   }
 
   const byStage = new Map()
+  const unassigned = []
   journeyMap.forEach((entry) => {
     const normalized = normalizeJourneyStage(entry)
     if (normalized.stage) {
       byStage.set(normalized.stage, normalized)
+    } else if (normalized.userAction || normalized.painPoint || normalized.opportunity || normalized.emotionalState !== "Neutral") {
+      unassigned.push(normalized)
     }
   })
 
+  let unassignedIndex = 0
   return journeyStageOrder.map((stage) => {
     if (byStage.has(stage)) {
       return byStage.get(stage)
+    }
+
+    if (unassignedIndex < unassigned.length) {
+      const fallbackStage = unassigned[unassignedIndex]
+      unassignedIndex += 1
+      return {
+        ...fallbackStage,
+        stage,
+      }
     }
 
     return {
