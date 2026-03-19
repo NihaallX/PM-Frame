@@ -1,12 +1,13 @@
 # PM Frame
 
-PM Frame is a frontend-first product thinking tool that turns one raw problem statement into three practical outputs in a single run:
+PM Frame is a frontend-first product thinking tool that turns one raw problem statement into four practical outputs in a single run:
 
 - `JTBD` to clarify the core user job
 - `Journey Map` to break down behavior, pain, and opportunity across stages
 - `PRD Skeleton` to turn strategy into an execution-ready outline
+- `Assumptions To Test` to surface the riskiest bets before execution
 
-It is designed for fast problem framing. You paste a messy product problem, and the app streams structured PM artifacts back into the UI instead of making you wait for one giant response.
+It is designed for fast problem framing. You paste a messy product problem, add optional context tags, and the app streams structured PM artifacts back into the UI instead of making you wait for one giant response.
 
 ## Screenshots
 
@@ -16,7 +17,7 @@ It is designed for fast problem framing. You paste a messy product problem, and 
 
 ### Generated Output
 
-![PM Frame generated JTBD, Journey Map, and PRD output](docs/images/pm-frame-output.png)
+![PM Frame generated JTBD, Journey Map, PRD, and assumptions output](docs/images/pm-frame-output.png)
 
 ## Why It Exists
 
@@ -67,6 +68,14 @@ Builds a lightweight product requirements draft with:
 - out-of-scope boundaries
 - open questions
 
+### 4. Assumptions To Test
+
+Adds a final validation lens with:
+
+- explicit product or user assumptions
+- risk levels (`HIGH`, `MEDIUM`, `LOW`)
+- concrete validation methods for each assumption
+
 ## Product Experience
 
 PM Frame is intentionally opinionated:
@@ -74,6 +83,9 @@ PM Frame is intentionally opinionated:
 - bold editorial UI rather than default dashboard styling
 - streamed responses so the interface updates progressively
 - strict structured output parsing to keep the response usable
+- statement scoring before generation to catch vague prompts
+- optional context tags to calibrate the analysis
+- client-side rate limiting to keep the browser session bounded
 - frontend-only architecture with no custom backend
 
 ## Tech Stack
@@ -89,9 +101,10 @@ PM Frame is intentionally opinionated:
 
 1. The user enters a product problem statement.
 2. The app sends that prompt directly to Groq from the frontend.
-3. The model returns structured JSON for `jtbd`, `journeyMap`, and `prd`.
-4. The UI streams partial output and normalizes it as data arrives.
-5. Cards render only when the content is meaningfully usable.
+3. A fast scorer checks statement quality before the full analysis runs.
+4. The model returns structured JSON for `jtbd`, `journeyMap`, `prd`, and `assumptions`.
+5. The UI streams partial output and normalizes it as data arrives.
+6. Cards render only when the content is meaningfully usable.
 
 There is no backend in this project. The API key is read from a Vite environment variable.
 
@@ -148,6 +161,7 @@ npm run build
 ```text
 src/
   components/
+    AssumptionsCard.jsx
     InputPanel.jsx
     JTBDCard.jsx
     JourneyMapCard.jsx
@@ -164,7 +178,10 @@ src/
 ## Notes
 
 - The app currently uses `llama-3.3-70b-versatile` only.
-- Streaming is supported, with a non-stream repair pass if the initial structured response is incomplete.
+- Streaming is supported, with a repair pass if the initial structured response is incomplete.
+- Statement scoring runs before the main analysis call.
+- Context tags can tailor output language, metrics, and feature framing.
+- Browser sessions are rate-limited to `10` successful analyses per hour via `localStorage`.
 - If Groq returns a `503`, that is typically an upstream availability issue rather than a frontend build issue.
 
 ## Future Improvements
