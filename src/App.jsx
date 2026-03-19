@@ -1,25 +1,46 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { AlertCircle, BriefcaseBusiness, Route, ScanSearch } from "lucide-react"
+import { AlertCircle, BriefcaseBusiness, FlaskConical, Route, ScanSearch } from "lucide-react"
 import InputPanel from "./components/InputPanel"
+import AssumptionsCard from "./components/AssumptionsCard"
 import JTBDCard from "./components/JTBDCard"
 import JourneyMapCard from "./components/JourneyMapCard"
 import PRDCard from "./components/PRDCard"
 import SkeletonCard from "./components/SkeletonCard"
-import { streamPmAnalysis } from "./utils/groq"
-import { hasRenderableAnalysis, isRenderableJourneyMap, isRenderableJtbd, isRenderablePrd } from "./utils/formatters"
+import { scoreProblemStatement, streamPmAnalysis } from "./utils/groq"
+import {
+  buildAssumptionsMarkdown,
+  buildJourneyMapMarkdown,
+  buildJtbdMarkdown,
+  buildPrdMarkdown,
+  hasRenderableAnalysis,
+  isRenderableAssumptions,
+  isRenderableJourneyMap,
+  isRenderableJtbd,
+  isRenderablePrd,
+} from "./utils/formatters"
 
 const FRIENDLY_ERROR_MESSAGE = "Analysis could not be generated. Check your API key or try rephrasing the problem."
+const REQUESTS_STORAGE_KEY = "pmframe_requests"
+const MAX_ANALYSES_PER_HOUR = 10
+const ONE_HOUR_MS = 60 * 60 * 1000
 
 const emptyAnalysis = {
   jtbd: null,
   journeyMap: null,
   prd: null,
+  assumptions: null,
 }
 
 const emptyModelMeta = {
   activeModel: "",
   candidateModels: [],
   availableModels: [],
+}
+
+const emptyTags = {
+  industry: "",
+  stage: "",
+  userType: "",
 }
 
 const previewItems = [
@@ -38,104 +59,118 @@ const previewItems = [
     title: "PRD Skeleton",
     description: "Problem, users, metrics, features, scope, and open questions.",
   },
+  {
+    label: "Framework 04",
+    title: "Assumptions",
+    description: "The highest-risk bets to test before the roadmap hardens.",
+  },
 ]
 
-function formatMarkdownList(items) {
-  return items.length ? items.map((item) => `- ${item}`).join("\n") : "- None"
+function getStoredRequestTimestamps() {
+  try {
+    const raw = window.localStorage.getItem(REQUESTS_STORAGE_KEY)
+    if (!raw) {
+      return []
+    }
+
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed)
+      ? parsed.filter((item) => Number.isFinite(item)).map((item) => Number(item))
+      : []
+  } catch {
+    return []
+  }
 }
 
-function buildJtbdMarkdown(data) {
-  return [
-    "# JTBD",
-    "",
-    "## Core Job",
-    data.coreJob || "None",
-    "",
-    "## Functional Jobs",
-    formatMarkdownList(data.functionalJobs),
-    "",
-    "## Emotional Jobs",
-    formatMarkdownList(data.emotionalJobs),
-    "",
-    "## Social Jobs",
-    formatMarkdownList(data.socialJobs),
-    "",
-    "## Underserved Outcomes",
-    formatMarkdownList(data.underservedOutcomes),
-  ].join("\n")
+function buildRateLimitSnapshot(now = Date.now()) {
+  const recent = getStoredRequestTimestamps()
+    .filter((timestamp) => now - timestamp < ONE_HOUR_MS)
+    .sort((left, right) => left - right)
+
+  return {
+    recent,
+    remaining: Math.max(0, MAX_ANALYSES_PER_HOUR - recent.length),
+    blocked: recent.length >= MAX_ANALYSES_PER_HOUR,
+    resetMinutes:
+      recent.length >= MAX_ANALYSES_PER_HOUR ? Math.max(1, Math.ceil((recent[0] + ONE_HOUR_MS - now) / 60000)) : 0,
+  }
 }
 
-function buildJourneyMapMarkdown(data) {
-  return [
-    "# Journey Map",
-    "",
-    ...data.flatMap((stage, index) => [
-      `## Stage ${index + 1}: ${stage.stage}`,
-      `- Emotional State: ${stage.emotionalState || "Neutral"}`,
-      `- User Action: ${stage.userAction || "None"}`,
-      `- Pain Point: ${stage.painPoint || "None"}`,
-      `- PM Opportunity: ${stage.opportunity || "None"}`,
-      "",
-    ]),
-  ].join("\n")
+function persistRequestTimestamps(timestamps) {
+  try {
+    window.localStorage.setItem(REQUESTS_STORAGE_KEY, JSON.stringify(timestamps))
+  } catch {
+    // Ignore storage failures in the browser and continue.
+  }
 }
 
-function buildPrdMarkdown(data) {
-  return [
-    "# PRD Skeleton",
-    "",
-    "## Problem Statement",
-    data.problemStatement || "None",
-    "",
-    "## Target Users",
-    `- Primary: ${data.targetUsers.primary || "None"}`,
-    `- Secondary: ${data.targetUsers.secondary || "None"}`,
-    "",
-    "## Success Metrics",
-    `- North Star: ${data.successMetrics.northStar || "None"}`,
-    "- Guardrails:",
-    formatMarkdownList(data.successMetrics.guardrails),
-    "",
-    "## Must-Have Features",
-    formatMarkdownList(data.mvpFeatures.mustHave),
-    "",
-    "## Nice-To-Have Features",
-    formatMarkdownList(data.mvpFeatures.niceToHave),
-    "",
-    "## Out Of Scope",
-    formatMarkdownList(data.outOfScope),
-    "",
-    "## Open Questions",
-    formatMarkdownList(data.openQuestions),
-  ].join("\n")
+function recordSuccessfulAnalysis(now = Date.now()) {
+  const snapshot = buildRateLimitSnapshot(now)
+  const next = [...snapshot.recent, now]
+  persistRequestTimestamps(next)
+  return buildRateLimitSnapshot(now)
+}
+
+function formatContextSummary(tags) {
+  const items = []
+
+  if (tags.industry) {
+    items.push(`INDUSTRY: ${tags.industry}`)
+  }
+  if (tags.stage) {
+    items.push(`STAGE: ${tags.stage}`)
+  }
+  if (tags.userType) {
+    items.push(`USER TYPE: ${tags.userType}`)
+  }
+
+  return items.length ? items.join(" / ") : "NO CONTEXT TAGS"
 }
 
 export default function App() {
   const [problemStatement, setProblemStatement] = useState("")
   const [inputError, setInputError] = useState("")
   const [status, setStatus] = useState("idle")
+  const [scorerStatus, setScorerStatus] = useState("idle")
   const [error, setError] = useState("")
   const [rawJsonBuffer, setRawJsonBuffer] = useState("")
   const [analysis, setAnalysis] = useState(emptyAnalysis)
   const [modelMeta, setModelMeta] = useState(emptyModelMeta)
   const [lastSubmittedProblem, setLastSubmittedProblem] = useState("")
+  const [pendingProblem, setPendingProblem] = useState("")
   const [copiedCardId, setCopiedCardId] = useState("")
+  const [rateLimit, setRateLimit] = useState({ remaining: MAX_ANALYSES_PER_HOUR, blocked: false, resetMinutes: 0 })
+  const [rateLimitNotice, setRateLimitNotice] = useState("")
+  const [statementQuality, setStatementQuality] = useState("unknown")
+  const [scorerFeedback, setScorerFeedback] = useState(null)
+  const [scorerWarning, setScorerWarning] = useState("")
+  const [selectedTags, setSelectedTags] = useState(emptyTags)
+  const [submittedTags, setSubmittedTags] = useState(emptyTags)
   const copyResetRef = useRef(null)
 
   useEffect(() => {
+    setRateLimit(buildRateLimitSnapshot())
+
+    const intervalId = window.setInterval(() => {
+      setRateLimit(buildRateLimitSnapshot())
+    }, 60000)
+
     return () => {
       if (copyResetRef.current) {
         window.clearTimeout(copyResetRef.current)
       }
+      window.clearInterval(intervalId)
     }
   }, [])
 
-  const shouldShowResults = status !== "idle" || hasRenderableAnalysis(analysis)
+  const shouldShowResults = ["streaming", "success", "error"].includes(status) || hasRenderableAnalysis(analysis)
+
   const renderable = useMemo(
     () => ({
       jtbd: isRenderableJtbd(analysis.jtbd),
       journeyMap: isRenderableJourneyMap(analysis.journeyMap),
       prd: isRenderablePrd(analysis.prd),
+      assumptions: isRenderableAssumptions(analysis.assumptions),
     }),
     [analysis],
   )
@@ -166,20 +201,77 @@ export default function App() {
         icon: <ScanSearch className="h-5 w-5" />,
         ready: renderable.prd,
       },
+      {
+        key: "assumptions",
+        id: "assumptions-panel",
+        label: "Framework 04",
+        title: "Assumptions",
+        icon: <FlaskConical className="h-5 w-5" />,
+        ready: renderable.assumptions,
+      },
     ],
     [renderable],
   )
 
   const completedFrameworks = frameworkState.filter((framework) => framework.ready).length
+  const metadataContextSummary = useMemo(() => formatContextSummary(submittedTags), [submittedTags])
 
   const markdownContent = useMemo(
     () => ({
       jtbd: renderable.jtbd ? buildJtbdMarkdown(analysis.jtbd) : "",
       journeyMap: renderable.journeyMap ? buildJourneyMapMarkdown(analysis.journeyMap) : "",
       prd: renderable.prd ? buildPrdMarkdown(analysis.prd) : "",
+      assumptions: renderable.assumptions ? buildAssumptionsMarkdown(analysis.assumptions) : "",
     }),
     [analysis, renderable],
   )
+
+  async function runMainAnalysis(statement, quality) {
+    const trimmedStatement = statement.trim()
+    const contextTags = { ...selectedTags }
+
+    setProblemStatement(trimmedStatement)
+    setLastSubmittedProblem(trimmedStatement)
+    setPendingProblem("")
+    setStatus("streaming")
+    setScorerStatus("idle")
+    setError("")
+    setRawJsonBuffer("")
+    setAnalysis(emptyAnalysis)
+    setModelMeta(emptyModelMeta)
+    setStatementQuality(quality)
+    setSubmittedTags(contextTags)
+    setRateLimitNotice("")
+
+    window.requestAnimationFrame(() => {
+      document.getElementById("results")?.scrollIntoView({ behavior: "smooth", block: "start" })
+    })
+
+    try {
+      const finalAnalysis = await streamPmAnalysis(trimmedStatement, {
+        contextTags,
+        onBuffer: setRawJsonBuffer,
+        onPartial: (partialAnalysis) => {
+          setAnalysis((current) => ({
+            jtbd: partialAnalysis.jtbd ?? current.jtbd,
+            journeyMap: partialAnalysis.journeyMap ?? current.journeyMap,
+            prd: partialAnalysis.prd ?? current.prd,
+            assumptions: partialAnalysis.assumptions ?? current.assumptions,
+          }))
+        },
+        onMeta: setModelMeta,
+      })
+
+      setAnalysis(finalAnalysis)
+      setStatus("success")
+      setRateLimit(recordSuccessfulAnalysis())
+    } catch (streamError) {
+      console.error(streamError)
+      setStatus("error")
+      setError(FRIENDLY_ERROR_MESSAGE)
+      setRateLimit(buildRateLimitSnapshot())
+    }
+  }
 
   async function handleAnalyze(submittedProblem = problemStatement) {
     const trimmedStatement = submittedProblem.trim()
@@ -189,38 +281,49 @@ export default function App() {
       return
     }
 
-    setInputError("")
-    setProblemStatement(trimmedStatement)
-    setLastSubmittedProblem(trimmedStatement)
-    setStatus("streaming")
-    setError("")
-    setRawJsonBuffer("")
-    setAnalysis(emptyAnalysis)
-    setModelMeta(emptyModelMeta)
+    const nextRateLimit = buildRateLimitSnapshot()
+    setRateLimit(nextRateLimit)
 
-    window.requestAnimationFrame(() => {
-      document.getElementById("results")?.scrollIntoView({ behavior: "smooth", block: "start" })
-    })
+    if (nextRateLimit.blocked) {
+      setRateLimitNotice(`RATE LIMIT REACHED. RESETS IN ${nextRateLimit.resetMinutes} MIN`)
+      return
+    }
+
+    setInputError("")
+    setRateLimitNotice("")
+    setScorerWarning("")
+    setScorerFeedback(null)
+    setPendingProblem(trimmedStatement)
+    setScorerStatus("evaluating")
+    setStatementQuality("unknown")
 
     try {
-      const finalAnalysis = await streamPmAnalysis(trimmedStatement, {
-        onBuffer: setRawJsonBuffer,
-        onPartial: (partialAnalysis) => {
-          setAnalysis((current) => ({
-            jtbd: partialAnalysis.jtbd ?? current.jtbd,
-            journeyMap: partialAnalysis.journeyMap ?? current.journeyMap,
-            prd: partialAnalysis.prd ?? current.prd,
-          }))
-        },
-        onMeta: setModelMeta,
-      })
+      const score = await scoreProblemStatement(trimmedStatement)
 
-      setAnalysis(finalAnalysis)
-      setStatus("success")
-    } catch (streamError) {
-      console.error(streamError)
-      setStatus("error")
-      setError(FRIENDLY_ERROR_MESSAGE)
+      if (!score.canProceed) {
+        setStatementQuality(score.score)
+        setScorerStatus("blocked")
+        setScorerFeedback({ mode: "blocked" })
+        return
+      }
+
+      if (score.score === "strong") {
+        await runMainAnalysis(trimmedStatement, score.score)
+        return
+      }
+
+      setStatementQuality(score.score)
+      setScorerStatus("feedback")
+      setScorerFeedback({
+        mode: "feedback",
+        score: score.score,
+        missingElements: score.missingElements,
+        improvedVersion: score.improvedVersion,
+      })
+    } catch (scoreError) {
+      console.error(scoreError)
+      setScorerWarning("STATEMENT CHECK UNAVAILABLE. CONTINUING WITH ANALYSIS.")
+      await runMainAnalysis(trimmedStatement, "unknown")
     }
   }
 
@@ -228,12 +331,21 @@ export default function App() {
     setProblemStatement("")
     setInputError("")
     setStatus("idle")
+    setScorerStatus("idle")
     setError("")
     setRawJsonBuffer("")
     setAnalysis(emptyAnalysis)
     setModelMeta(emptyModelMeta)
     setLastSubmittedProblem("")
+    setPendingProblem("")
     setCopiedCardId("")
+    setRateLimit(buildRateLimitSnapshot())
+    setRateLimitNotice("")
+    setStatementQuality("unknown")
+    setScorerFeedback(null)
+    setScorerWarning("")
+    setSelectedTags(emptyTags)
+    setSubmittedTags(emptyTags)
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
 
@@ -267,6 +379,38 @@ export default function App() {
     }
   }
 
+  function handleTagToggle(groupKey, value) {
+    setSelectedTags((current) => ({
+      ...current,
+      [groupKey]: current[groupKey] === value ? "" : value,
+    }))
+  }
+
+  function handleDismissBlocked() {
+    setScorerStatus("idle")
+    setScorerFeedback(null)
+  }
+
+  function handleAnalyzeAnyway() {
+    if (!pendingProblem) {
+      return
+    }
+
+    setScorerFeedback(null)
+    void runMainAnalysis(pendingProblem, statementQuality)
+  }
+
+  function handleUseSuggested() {
+    const improvedVersion = scorerFeedback?.improvedVersion?.trim()
+    if (!improvedVersion) {
+      return
+    }
+
+    setProblemStatement(improvedVersion)
+    setScorerFeedback(null)
+    void runMainAnalysis(improvedVersion, statementQuality)
+  }
+
   function renderFrameworkCard(framework) {
     if (framework.key === "jtbd" && renderable.jtbd) {
       return <JTBDCard data={analysis.jtbd} isCopied={copiedCardId === "jtbd"} onCopy={() => handleCopy("jtbd")} />
@@ -284,6 +428,16 @@ export default function App() {
 
     if (framework.key === "prd" && renderable.prd) {
       return <PRDCard data={analysis.prd} isCopied={copiedCardId === "prd"} onCopy={() => handleCopy("prd")} />
+    }
+
+    if (framework.key === "assumptions" && renderable.assumptions) {
+      return (
+        <AssumptionsCard
+          data={analysis.assumptions}
+          isCopied={copiedCardId === "assumptions"}
+          onCopy={() => handleCopy("assumptions")}
+        />
+      )
     }
 
     return (
@@ -332,15 +486,33 @@ export default function App() {
 
             <InputPanel
               problemStatement={problemStatement}
-              error={inputError}
+              inputError={inputError}
               onChange={(value) => {
                 setProblemStatement(value)
                 if (inputError && value.trim()) {
                   setInputError("")
                 }
+                if (rateLimitNotice) {
+                  setRateLimitNotice("")
+                }
+                if (scorerStatus !== "idle" && status !== "streaming") {
+                  setScorerStatus("idle")
+                  setScorerFeedback(null)
+                  setScorerWarning("")
+                }
               }}
               onSubmit={() => void handleAnalyze()}
-              isLoading={status === "streaming"}
+              isBusy={status === "streaming" || scorerStatus === "evaluating"}
+              remainingAnalyses={rateLimit.remaining}
+              rateLimitMessage={rateLimitNotice}
+              isEvaluating={scorerStatus === "evaluating"}
+              scorerFeedback={scorerFeedback}
+              scorerWarning={scorerWarning}
+              selectedTags={selectedTags}
+              onTagToggle={handleTagToggle}
+              onUseSuggested={handleUseSuggested}
+              onAnalyzeAnyway={handleAnalyzeAnyway}
+              onDismissBlocked={handleDismissBlocked}
             />
           </div>
 
@@ -351,7 +523,7 @@ export default function App() {
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-white/80">What You Get</p>
                   <h3 className="mt-4 text-4xl font-black uppercase leading-none tracking-tighterest md:text-5xl">
-                    Three
+                    Four
                     <br />
                     PM Frames
                   </h3>
@@ -383,7 +555,7 @@ export default function App() {
                 </h3>
               </div>
               <p className="max-w-xl text-sm uppercase tracking-[0.22em] text-black/55">
-                One response. Three PM lenses. Faster problem framing with less blank-page thrash.
+                One response. Four PM lenses. Faster framing, clearer tradeoffs, fewer blind spots.
               </p>
             </div>
 
@@ -393,7 +565,7 @@ export default function App() {
                 onClick={handleReset}
                 className="print-hide text-xs font-semibold uppercase tracking-[0.32em] text-black/65 transition-colors hover:text-swiss-red"
               >
-                ← New Analysis
+                {"\u2190"} New Analysis
               </button>
             </div>
 
@@ -405,6 +577,10 @@ export default function App() {
                 </p>
               </div>
             )}
+
+            <div className="metadata-strip mb-6">
+              ANALYZED WITH: {metadataContextSummary} {"\u00b7"} STATEMENT QUALITY: {statementQuality.toUpperCase()}
+            </div>
 
             {status === "error" && (
               <div className="mb-6 border border-black bg-white p-5">
@@ -423,13 +599,13 @@ export default function App() {
                     onClick={handleRetry}
                     className="print-hide inline-flex items-center justify-center border border-black bg-black px-5 py-3 text-xs font-semibold uppercase tracking-[0.32em] text-white transition-colors hover:bg-swiss-red"
                   >
-                    RETRY →
+                    RETRY {"\u2192"}
                   </button>
                 </div>
               </div>
             )}
 
-            <div className="mb-8 grid gap-3 md:grid-cols-3">
+            <div className="mb-8 grid gap-3 md:grid-cols-4">
               {frameworkState.map((framework) => (
                 <div
                   key={framework.id}
@@ -452,17 +628,17 @@ export default function App() {
                 aria-live="polite"
               >
                 <span>Live stream active</span>
-                <span>{completedFrameworks}/3 frameworks ready</span>
+                <span>{completedFrameworks}/4 frameworks ready</span>
                 <span>{rawJsonBuffer.length} chars received</span>
               </div>
             )}
 
-            <div className="grid gap-8 md:grid-cols-3 md:items-stretch">
+            <div className="output-grid">
               {frameworkState.map((framework, index) => (
                 <div
                   key={framework.id}
                   id={framework.id}
-                  className="fade-in-up md:h-[66rem] lg:h-[70rem]"
+                  className="output-card-shell fade-in-up"
                   style={{ animationDelay: `${0.04 + index * 0.06}s` }}
                 >
                   {renderFrameworkCard(framework)}
@@ -476,7 +652,7 @@ export default function App() {
                 onClick={() => window.print()}
                 className="print-hide inline-flex items-center justify-center border border-black bg-black px-6 py-4 text-sm font-semibold uppercase tracking-[0.34em] text-white transition-colors hover:bg-swiss-red"
               >
-                EXPORT AS PDF →
+                EXPORT AS PDF {"\u2192"}
               </button>
             </div>
           </div>

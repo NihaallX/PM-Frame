@@ -1,182 +1,117 @@
-const journeyStageOrder = ["Trigger", "Explore", "Decide", "Use", "Reflect"]
+const DEFAULT_STAGES = ["Trigger", "Explore", "Decide", "Use", "Reflect"]
 
-const stageAliases = {
+const STAGE_ALIASES = {
   trigger: "Trigger",
   awareness: "Trigger",
+  discover: "Trigger",
+  discovery: "Trigger",
   identify: "Trigger",
   explore: "Explore",
-  discovery: "Explore",
   research: "Explore",
   evaluate: "Explore",
-  comparison: "Explore",
   compare: "Explore",
-  consider: "Decide",
-  decision: "Decide",
+  comparison: "Explore",
   decide: "Decide",
   choose: "Decide",
   select: "Decide",
   purchase: "Decide",
-  buy: "Decide",
-  onboarding: "Use",
+  convert: "Decide",
   use: "Use",
+  onboard: "Use",
+  activation: "Use",
   adopt: "Use",
-  activate: "Use",
-  implementation: "Use",
-  execute: "Use",
-  retention: "Reflect",
+  consume: "Use",
   reflect: "Reflect",
-  review: "Reflect",
-  advocacy: "Reflect",
-  renew: "Reflect",
+  retain: "Reflect",
+  renewal: "Reflect",
+  recommend: "Reflect",
+  loyalty: "Reflect",
 }
 
-const emotionLabelMap = [
-  { match: /frustrat|stress|anxious|overwhelm|blocked|stuck/i, label: "Frustrated" },
-  { match: /curious|interested|hopeful|optimistic/i, label: "Curious" },
-  { match: /confident|certain|reassured|clear/i, label: "Confident" },
-  { match: /happy|delighted|satisfied|positive/i, label: "Satisfied" },
-  { match: /relieved|resolved|comforted/i, label: "Relieved" },
-  { match: /confused|unsure|uncertain|lost/i, label: "Uncertain" },
+const PLACEHOLDER_PATTERNS = [
+  /^none$/i,
+  /^n\/a$/i,
+  /^not provided yet\.?$/i,
+  /^not provided\.?$/i,
+  /^not available\.?$/i,
+  /^waiting for this section/i,
+  /^core job will appear/i,
+  /^action details will appear/i,
+  /^pain point details will appear/i,
+  /^opportunity ideas will appear/i,
+  /^problem statement framing will appear/i,
+  /^no underserved outcomes yet\.?$/i,
+  /^north star metric pending$/i,
 ]
 
-function asArray(value) {
-  return Array.isArray(value) ? value.filter(Boolean).map(String) : []
-}
-
-function asText(value) {
+function asString(value) {
   return typeof value === "string" ? value.trim() : ""
 }
 
-function toTitleCase(value) {
-  return value
-    .replace(/[_-]+/g, " ")
-    .split(" ")
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ")
-}
-
-function formatEmotionalState(value) {
-  const cleaned = asText(value).replace(/^[^\p{L}\p{N}]+/u, "")
-  if (!cleaned) {
-    return "Neutral"
-  }
-
-  const mapped = emotionLabelMap.find((entry) => entry.match.test(cleaned))
-  if (mapped) {
-    return mapped.label
-  }
-
-  return toTitleCase(cleaned)
-}
-
-function normalizeStageName(stage) {
-  const raw = asText(stage).toLowerCase()
-  return stageAliases[raw] ?? journeyStageOrder.find((item) => item.toLowerCase() === raw) ?? ""
-}
-
-function normalizeJourneyStage(stage) {
-  return {
-    stage: normalizeStageName(stage?.stage),
-    userAction: asText(stage?.userAction),
-    emotionalState: formatEmotionalState(stage?.emotionalState),
-    painPoint: asText(stage?.painPoint),
-    opportunity: asText(stage?.opportunity),
-  }
-}
-
-export function normalizeJtbd(jtbd) {
-  if (!jtbd || typeof jtbd !== "object") {
-    return null
-  }
-
-  return {
-    coreJob: asText(jtbd.coreJob),
-    functionalJobs: asArray(jtbd.functionalJobs),
-    emotionalJobs: asArray(jtbd.emotionalJobs),
-    socialJobs: asArray(jtbd.socialJobs),
-    underservedOutcomes: asArray(jtbd.underservedOutcomes),
-  }
-}
-
-export function normalizeJourneyMap(journeyMap) {
-  if (!Array.isArray(journeyMap)) {
-    return null
-  }
-
-  const byStage = new Map()
-  const unassigned = []
-  journeyMap.forEach((entry) => {
-    const normalized = normalizeJourneyStage(entry)
-    if (normalized.stage) {
-      byStage.set(normalized.stage, normalized)
-    } else if (normalized.userAction || normalized.painPoint || normalized.opportunity || normalized.emotionalState !== "Neutral") {
-      unassigned.push(normalized)
-    }
-  })
-
-  let unassignedIndex = 0
-  return journeyStageOrder.map((stage) => {
-    if (byStage.has(stage)) {
-      return byStage.get(stage)
-    }
-
-    if (unassignedIndex < unassigned.length) {
-      const fallbackStage = unassigned[unassignedIndex]
-      unassignedIndex += 1
-      return {
-        ...fallbackStage,
-        stage,
-      }
-    }
-
-    return {
-      stage,
-      userAction: "",
-      emotionalState: "Neutral",
-      painPoint: "",
-      opportunity: "",
-    }
-  })
-}
-
-export function normalizePrd(prd) {
-  if (!prd || typeof prd !== "object") {
-    return null
-  }
-
-  return {
-    problemStatement: asText(prd.problemStatement),
-    targetUsers: {
-      primary: asText(prd?.targetUsers?.primary),
-      secondary: asText(prd?.targetUsers?.secondary),
-    },
-    successMetrics: {
-      northStar: asText(prd?.successMetrics?.northStar),
-      guardrails: asArray(prd?.successMetrics?.guardrails),
-    },
-    mvpFeatures: {
-      mustHave: asArray(prd?.mvpFeatures?.mustHave),
-      niceToHave: asArray(prd?.mvpFeatures?.niceToHave),
-    },
-    outOfScope: asArray(prd?.outOfScope),
-    openQuestions: asArray(prd?.openQuestions),
-  }
-}
-
-export function normalizeAnalysis(data) {
-  return {
-    jtbd: normalizeJtbd(data?.jtbd),
-    journeyMap: normalizeJourneyMap(data?.journeyMap),
-    prd: normalizePrd(data?.prd),
-  }
-}
-
-export function isRenderableJtbd(jtbd) {
-  if (!jtbd) {
+function isMeaningfulText(value) {
+  const text = asString(value)
+  if (!text) {
     return false
   }
 
+  return !PLACEHOLDER_PATTERNS.some((pattern) => pattern.test(text))
+}
+
+function normalizeStringArray(value) {
+  const source = Array.isArray(value) ? value : []
+  const seen = new Set()
+
+  return source
+    .map((item) => asString(item))
+    .filter((item) => isMeaningfulText(item))
+    .filter((item) => {
+      const signature = item.toLowerCase()
+      if (seen.has(signature)) {
+        return false
+      }
+      seen.add(signature)
+      return true
+    })
+}
+
+function formatMarkdownList(items) {
+  return items.length ? items.map((item) => `- ${item}`).join("\n") : "- None"
+}
+
+export function cleanJsonBuffer(buffer) {
+  const source = asString(buffer)
+  if (!source) {
+    return ""
+  }
+
+  const fencedMatch = source.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  if (fencedMatch?.[1]) {
+    return fencedMatch[1].trim()
+  }
+
+  const firstBrace = source.indexOf("{")
+  const lastBrace = source.lastIndexOf("}")
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace >= firstBrace) {
+    return source.slice(firstBrace, lastBrace + 1).trim()
+  }
+
+  return source
+}
+
+export function normalizeJtbd(value) {
+  const source = value && typeof value === "object" ? value : {}
+
+  return {
+    coreJob: isMeaningfulText(source.coreJob) ? asString(source.coreJob) : "",
+    functionalJobs: normalizeStringArray(source.functionalJobs),
+    emotionalJobs: normalizeStringArray(source.emotionalJobs),
+    socialJobs: normalizeStringArray(source.socialJobs),
+    underservedOutcomes: normalizeStringArray(source.underservedOutcomes),
+  }
+}
+
+export function isRenderableJtbd(value) {
+  const jtbd = normalizeJtbd(value)
   return Boolean(
     jtbd.coreJob ||
       jtbd.functionalJobs.length ||
@@ -186,22 +121,106 @@ export function isRenderableJtbd(jtbd) {
   )
 }
 
-export function isRenderableJourneyMap(journeyMap) {
-  if (!Array.isArray(journeyMap)) {
-    return false
+function normalizeStageLabel(value, index) {
+  const raw = asString(value)
+  if (!raw) {
+    return DEFAULT_STAGES[index] ?? `Stage ${index + 1}`
   }
 
-  return journeyMap.some(
-    (stage) =>
-      Boolean(stage?.userAction) || Boolean(stage?.painPoint) || Boolean(stage?.opportunity) || stage?.emotionalState !== "Neutral",
+  return STAGE_ALIASES[raw.toLowerCase()] || raw.toUpperCase()
+}
+
+function normalizeJourneyStage(value, index) {
+  const source = value && typeof value === "object" ? value : {}
+
+  return {
+    stage: normalizeStageLabel(source.stage, index),
+    userAction: isMeaningfulText(source.userAction) ? asString(source.userAction) : "",
+    emotionalState: isMeaningfulText(source.emotionalState) ? asString(source.emotionalState) : "",
+    painPoint: isMeaningfulText(source.painPoint) ? asString(source.painPoint) : "",
+    opportunity: isMeaningfulText(source.opportunity) ? asString(source.opportunity) : "",
+  }
+}
+
+export function normalizeJourneyMap(value) {
+  const source = Array.isArray(value) ? value : []
+  const seeded = DEFAULT_STAGES.map((stage) => ({
+    stage,
+    userAction: "",
+    emotionalState: "",
+    painPoint: "",
+    opportunity: "",
+  }))
+  const unmatched = []
+
+  source.forEach((item, index) => {
+    const stage = normalizeJourneyStage(item, index)
+    const canonicalIndex = DEFAULT_STAGES.findIndex((defaultStage) => defaultStage === stage.stage)
+
+    if (canonicalIndex !== -1) {
+      seeded[canonicalIndex] = { ...seeded[canonicalIndex], ...stage }
+    } else if (
+      stage.stage ||
+      stage.userAction ||
+      stage.emotionalState ||
+      stage.painPoint ||
+      stage.opportunity
+    ) {
+      unmatched.push(stage)
+    }
+  })
+
+  unmatched.forEach((stage) => {
+    const availableIndex = seeded.findIndex(
+      (item) => !item.userAction && !item.emotionalState && !item.painPoint && !item.opportunity,
+    )
+
+    if (availableIndex !== -1) {
+      seeded[availableIndex] = {
+        ...seeded[availableIndex],
+        ...stage,
+        stage: DEFAULT_STAGES[availableIndex],
+      }
+    }
+  })
+
+  return seeded
+}
+
+export function isRenderableJourneyMap(value) {
+  return normalizeJourneyMap(value).some(
+    (stage) => stage.userAction || stage.emotionalState || stage.painPoint || stage.opportunity,
   )
 }
 
-export function isRenderablePrd(prd) {
-  if (!prd) {
-    return false
-  }
+export function normalizePrd(value) {
+  const source = value && typeof value === "object" ? value : {}
+  const targetUsers = source.targetUsers && typeof source.targetUsers === "object" ? source.targetUsers : {}
+  const successMetrics =
+    source.successMetrics && typeof source.successMetrics === "object" ? source.successMetrics : {}
+  const mvpFeatures = source.mvpFeatures && typeof source.mvpFeatures === "object" ? source.mvpFeatures : {}
 
+  return {
+    problemStatement: isMeaningfulText(source.problemStatement) ? asString(source.problemStatement) : "",
+    targetUsers: {
+      primary: isMeaningfulText(targetUsers.primary) ? asString(targetUsers.primary) : "",
+      secondary: isMeaningfulText(targetUsers.secondary) ? asString(targetUsers.secondary) : "",
+    },
+    successMetrics: {
+      northStar: isMeaningfulText(successMetrics.northStar) ? asString(successMetrics.northStar) : "",
+      guardrails: normalizeStringArray(successMetrics.guardrails),
+    },
+    mvpFeatures: {
+      mustHave: normalizeStringArray(mvpFeatures.mustHave),
+      niceToHave: normalizeStringArray(mvpFeatures.niceToHave),
+    },
+    outOfScope: normalizeStringArray(source.outOfScope),
+    openQuestions: normalizeStringArray(source.openQuestions),
+  }
+}
+
+export function isRenderablePrd(value) {
+  const prd = normalizePrd(value)
   return Boolean(
     prd.problemStatement ||
       prd.targetUsers.primary ||
@@ -215,16 +234,142 @@ export function isRenderablePrd(prd) {
   )
 }
 
-export function hasRenderableAnalysis(data) {
+function normalizeRisk(value) {
+  const normalized = asString(value).toUpperCase()
+  if (normalized === "HIGH" || normalized === "MEDIUM" || normalized === "LOW") {
+    return normalized
+  }
+  return "MEDIUM"
+}
+
+export function normalizeAssumptions(value) {
+  const source = Array.isArray(value) ? value : []
+
+  return source
+    .map((item) => {
+      const assumption = item && typeof item === "object" ? item : {}
+      return {
+        assumption: isMeaningfulText(assumption.assumption) ? asString(assumption.assumption) : "",
+        risk: normalizeRisk(assumption.risk),
+        validationMethod: isMeaningfulText(assumption.validationMethod) ? asString(assumption.validationMethod) : "",
+      }
+    })
+    .filter((item) => item.assumption || item.validationMethod)
+}
+
+export function isRenderableAssumptions(value) {
+  return normalizeAssumptions(value).length > 0
+}
+
+export function normalizeAnalysis(value) {
+  const source = value && typeof value === "object" ? value : {}
+
+  return {
+    jtbd: normalizeJtbd(source.jtbd),
+    journeyMap: normalizeJourneyMap(source.journeyMap),
+    prd: normalizePrd(source.prd),
+    assumptions: normalizeAssumptions(source.assumptions),
+  }
+}
+
+export function hasRenderableAnalysis(value) {
+  const analysis = normalizeAnalysis(value)
   return Boolean(
-    isRenderableJtbd(data?.jtbd) || isRenderableJourneyMap(data?.journeyMap) || isRenderablePrd(data?.prd),
+    isRenderableJtbd(analysis.jtbd) ||
+      isRenderableJourneyMap(analysis.journeyMap) ||
+      isRenderablePrd(analysis.prd) ||
+      isRenderableAssumptions(analysis.assumptions),
   )
 }
 
-export function cleanJsonBuffer(value) {
-  return String(value ?? "")
-    .trim()
-    .replace(/^```json\s*/i, "")
-    .replace(/^```\s*/i, "")
-    .replace(/\s*```$/i, "")
+export function buildJtbdMarkdown(data) {
+  const jtbd = normalizeJtbd(data)
+
+  return [
+    "# JTBD",
+    "",
+    "## Core Job",
+    jtbd.coreJob || "None",
+    "",
+    "## Functional Jobs",
+    formatMarkdownList(jtbd.functionalJobs),
+    "",
+    "## Emotional Jobs",
+    formatMarkdownList(jtbd.emotionalJobs),
+    "",
+    "## Social Jobs",
+    formatMarkdownList(jtbd.socialJobs),
+    "",
+    "## Underserved Outcomes",
+    formatMarkdownList(jtbd.underservedOutcomes),
+  ].join("\n")
+}
+
+export function buildJourneyMapMarkdown(data) {
+  const journeyMap = normalizeJourneyMap(data)
+
+  return [
+    "# Journey Map",
+    "",
+    ...journeyMap.flatMap((stage, index) => [
+      `## Stage ${index + 1}: ${stage.stage}`,
+      `- Emotional State: ${stage.emotionalState || "Neutral"}`,
+      `- User Action: ${stage.userAction || "None"}`,
+      `- Pain Point: ${stage.painPoint || "None"}`,
+      `- PM Opportunity: ${stage.opportunity || "None"}`,
+      "",
+    ]),
+  ].join("\n")
+}
+
+export function buildPrdMarkdown(data) {
+  const prd = normalizePrd(data)
+
+  return [
+    "# PRD Skeleton",
+    "",
+    "## Problem Statement",
+    prd.problemStatement || "None",
+    "",
+    "## Target Users",
+    `- Primary: ${prd.targetUsers.primary || "None"}`,
+    `- Secondary: ${prd.targetUsers.secondary || "None"}`,
+    "",
+    "## Success Metrics",
+    `- North Star: ${prd.successMetrics.northStar || "None"}`,
+    "- Guardrails:",
+    formatMarkdownList(prd.successMetrics.guardrails),
+    "",
+    "## Must-Have Features",
+    formatMarkdownList(prd.mvpFeatures.mustHave),
+    "",
+    "## Nice-To-Have Features",
+    formatMarkdownList(prd.mvpFeatures.niceToHave),
+    "",
+    "## Out Of Scope",
+    formatMarkdownList(prd.outOfScope),
+    "",
+    "## Open Questions",
+    formatMarkdownList(prd.openQuestions),
+  ].join("\n")
+}
+
+export function buildAssumptionsMarkdown(data) {
+  const assumptions = normalizeAssumptions(data)
+
+  return [
+    "# Assumptions To Test",
+    "",
+    ...(
+      assumptions.length
+        ? assumptions.flatMap((item, index) => [
+            `## Assumption ${index + 1}`,
+            item.assumption || "None",
+            `- Risk: ${item.risk}`,
+            `- Test: ${item.validationMethod || "None"}`,
+            "",
+          ])
+        : ["- None", ""]
+    ),
+  ].join("\n")
 }
