@@ -24,12 +24,12 @@ function BulletSection({ title, items, inverted = false }) {
   )
 }
 
-export default function PRDCard({ data }) {
+export default function PRDCard({ data, isCopied, onCopy }) {
   const mustHaveCount = data.mvpFeatures.mustHave.length
   const niceToHaveCount = data.mvpFeatures.niceToHave.length
 
   return (
-    <article className="border border-black bg-white shadow-panel">
+    <article className="analysis-card print-card flex h-full min-h-0 flex-col overflow-hidden border border-black bg-white shadow-panel">
       <div className="border-b border-black px-6 py-5">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -42,7 +42,7 @@ export default function PRDCard({ data }) {
         </div>
       </div>
 
-      <div className="space-y-8 p-6">
+      <div className="analysis-card-scroll flex-1 min-h-0 space-y-8 overflow-y-auto p-6">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-black/55">Problem Statement</p>
           <p className="mt-4 text-sm leading-7 text-black/75">
@@ -71,12 +71,22 @@ export default function PRDCard({ data }) {
           </div>
         </div>
 
-        <div className="grid gap-8">
+        <div className="grid gap-8 pb-1">
           <BulletSection title="Must-Have Features" items={data.mvpFeatures.mustHave} />
           <BulletSection title="Nice-To-Have Features" items={data.mvpFeatures.niceToHave} />
           <BulletSection title="Out Of Scope" items={data.outOfScope} />
           <BulletSection title="Open Questions" items={data.openQuestions} />
         </div>
+      </div>
+
+      <div className="print-hide border-t border-black px-6 py-4">
+        <button
+          type="button"
+          onClick={onCopy}
+          className="font-mono text-[11px] font-semibold uppercase tracking-[0.28em] text-black/70 transition-colors hover:text-swiss-red"
+        >
+          {isCopied ? "COPIED" : "COPY AS MARKDOWN"}
+        </button>
       </div>
     </article>
   )

@@ -17,11 +17,11 @@ function SectionList({ title, items }) {
   )
 }
 
-export default function JTBDCard({ data }) {
+export default function JTBDCard({ data, isCopied, onCopy }) {
   const jobsCount = data.functionalJobs.length + data.emotionalJobs.length + data.socialJobs.length
 
   return (
-    <article className="border border-black bg-white shadow-panel">
+    <article className="analysis-card print-card flex h-full min-h-0 flex-col overflow-hidden border border-black bg-white shadow-panel">
       <div className="border-b border-black bg-swiss-red px-6 py-5 text-white">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -34,7 +34,7 @@ export default function JTBDCard({ data }) {
         </div>
       </div>
 
-      <div className="space-y-8 p-6">
+      <div className="analysis-card-scroll flex-1 min-h-0 space-y-8 overflow-y-auto p-6">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-black/55">Core Job</p>
           <p className="mt-4 text-lg leading-8 text-black/80">
@@ -48,7 +48,7 @@ export default function JTBDCard({ data }) {
           <SectionList title="Social Jobs" items={data.socialJobs} />
         </div>
 
-        <div>
+        <div className="pb-1">
           <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-black/55">Underserved Outcomes</p>
           {data.underservedOutcomes.length > 0 ? (
             <div className="mt-4 grid gap-3">
@@ -64,6 +64,16 @@ export default function JTBDCard({ data }) {
             </p>
           )}
         </div>
+      </div>
+
+      <div className="print-hide border-t border-black px-6 py-4">
+        <button
+          type="button"
+          onClick={onCopy}
+          className="font-mono text-[11px] font-semibold uppercase tracking-[0.28em] text-black/70 transition-colors hover:text-swiss-red"
+        >
+          {isCopied ? "COPIED" : "COPY AS MARKDOWN"}
+        </button>
       </div>
     </article>
   )

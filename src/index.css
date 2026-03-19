@@ -92,3 +92,54 @@ a {
     transform: translateX(120%);
   }
 }
+
+.analysis-card-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(10, 10, 10, 0.35) transparent;
+}
+
+.analysis-card-scroll::-webkit-scrollbar {
+  width: 10px;
+}
+
+.analysis-card-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: rgba(10, 10, 10, 0.3);
+  background-clip: padding-box;
+}
+
+.analysis-card-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media print {
+  html {
+    scroll-behavior: auto;
+  }
+
+  body {
+    background: #ffffff !important;
+  }
+
+  .print-hide {
+    display: none !important;
+  }
+
+  .print-card {
+    height: auto !important;
+    min-height: 0 !important;
+    box-shadow: none !important;
+    break-inside: avoid;
+  }
+
+  .analysis-card-scroll {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+
+  .fade-in-up,
+  .skeleton-shimmer::after {
+    animation: none !important;
+  }
+}
