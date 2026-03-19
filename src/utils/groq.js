@@ -7,43 +7,11 @@ import {
 } from "./formatters"
 
 const GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
-const GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
-
-const DEFAULT_TEXT_MODEL = "llama-3.3-70b-versatile"
-const PREFERRED_TEXT_MODELS = [
-  "llama-3.3-70b-versatile",
-  "openai/gpt-oss-120b",
-  "moonshotai/kimi-k2-instruct-0905",
-  "qwen/qwen3-32b",
-  "llama-3.1-8b-instant",
-]
-
-const NON_CHAT_MODEL_PATTERN = /(whisper|prompt-guard|safeguard|orpheus|allam-2)/i
+const MODEL_ID = "llama-3.3-70b-versatile"
 const RESPONSE_FORMAT_UNSUPPORTED_PATTERN = /(response_format|json_object|unsupported|invalid_request_error)/i
 
 const SYSTEM_PROMPT =
   'You are a senior product manager. Given a product problem statement, return ONLY a JSON object (no markdown, no explanation) with exactly these keys:\n- jtbd: { coreJob, functionalJobs[], emotionalJobs[], socialJobs[], underservedOutcomes[] }\n- journeyMap: array of 5 objects { stage, userAction, emotionalState, painPoint, opportunity }\n- prd: { problemStatement, targetUsers: {primary, secondary}, successMetrics: {northStar, guardrails[]}, mvpFeatures: {mustHave[], niceToHave[]}, outOfScope[], openQuestions[] }\nBe specific, realistic, and actionable.'
-
-let cachedModelPlanPromise = null
-
-function unique(items) {
-  return [...new Set(items.filter(Boolean))]
-}
-
-function asModelList(value) {
-  if (!value || typeof value !== "string") {
-    return []
-  }
-
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean)
-}
-
-function isLikelyChatModel(modelId) {
-  return typeof modelId === "string" && !NON_CHAT_MODEL_PATTERN.test(modelId)
-}
 
 function hasCompleteAnalysis(analysis) {
   return Boolean(
@@ -59,68 +27,6 @@ function ensureApiKey() {
     throw new Error("Add VITE_GROQ_API_KEY to your environment before running an analysis.")
   }
   return apiKey
-}
-
-async function listAvailableModels(apiKey) {
-  try {
-    const response = await fetch(GROQ_MODELS_URL, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
-    })
-
-    if (!response.ok) {
-      return []
-    }
-
-    const payload = await response.json()
-    return (payload?.data ?? [])
-      .filter((model) => model?.active !== false)
-      .map((model) => model?.id)
-      .filter(Boolean)
-      .sort()
-  } catch {
-    return []
-  }
-}
-
-function buildModelCandidates(availableModels) {
-  const availableSet = new Set(availableModels)
-  const envModel = asModelList(import.meta.env.VITE_GROQ_MODEL)
-  const envFallbackModels = asModelList(import.meta.env.VITE_GROQ_MODEL_FALLBACKS)
-
-  const orderedPreference = unique([
-    ...envModel,
-    ...envFallbackModels,
-    ...PREFERRED_TEXT_MODELS,
-    DEFAULT_TEXT_MODEL,
-  ])
-
-  const preferredAvailable = orderedPreference.filter(
-    (modelId) => (availableSet.size === 0 || availableSet.has(modelId)) && isLikelyChatModel(modelId),
-  )
-
-  const remainingChatModels = availableModels.filter(
-    (modelId) => !preferredAvailable.includes(modelId) && isLikelyChatModel(modelId),
-  )
-
-  return unique([...preferredAvailable, ...remainingChatModels]).slice(0, 5)
-}
-
-async function getModelPlan(apiKey) {
-  if (!cachedModelPlanPromise) {
-    cachedModelPlanPromise = (async () => {
-      const availableModels = await listAvailableModels(apiKey)
-      const candidateModels = buildModelCandidates(availableModels)
-
-      return {
-        availableModels,
-        candidateModels: candidateModels.length ? candidateModels : [DEFAULT_TEXT_MODEL],
-      }
-    })()
-  }
-
-  return cachedModelPlanPromise
 }
 
 function extractBalancedSegment(source, key, opener, closer) {
@@ -208,9 +114,9 @@ function shouldRetryWithoutResponseFormat(details) {
   return RESPONSE_FORMAT_UNSUPPORTED_PATTERN.test(String(details ?? ""))
 }
 
-function buildCompletionBody({ model, problemStatement, stream, forceJsonObject }) {
+function buildCompletionBody({ problemStatement, stream, forceJsonObject }) {
   const body = {
-    model,
+    model: MODEL_ID,
     stream,
     temperature: 0.2,
     messages: [
@@ -226,7 +132,7 @@ function buildCompletionBody({ model, problemStatement, stream, forceJsonObject 
   return body
 }
 
-async function startCompletionRequest({ apiKey, model, problemStatement, stream }) {
+async function startCompletionRequest({ apiKey, problemStatement, stream }) {
   for (const forceJsonObject of [true, false]) {
     const response = await fetch(GROQ_CHAT_URL, {
       method: "POST",
@@ -234,7 +140,7 @@ async function startCompletionRequest({ apiKey, model, problemStatement, stream 
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify(buildCompletionBody({ model, problemStatement, stream, forceJsonObject })),
+      body: JSON.stringify(buildCompletionBody({ problemStatement, stream, forceJsonObject })),
     })
 
     if (response.ok) {
@@ -246,10 +152,10 @@ async function startCompletionRequest({ apiKey, model, problemStatement, stream 
       continue
     }
 
-    throw new Error(details || `Groq returned an error while starting the analysis with model "${model}".`)
+    throw new Error(details || `Groq returned an error while starting the analysis with model "${MODEL_ID}".`)
   }
 
-  throw new Error(`Unable to start completion with model "${model}".`)
+  throw new Error(`Unable to start completion with model "${MODEL_ID}".`)
 }
 
 async function streamContentFromResponse(response, { onBuffer, onPartial } = {}) {
@@ -340,10 +246,9 @@ function extractMessageContent(payload) {
   return ""
 }
 
-async function fetchRepairAnalysis({ apiKey, model, problemStatement }) {
+async function fetchRepairAnalysis({ apiKey, problemStatement }) {
   const response = await startCompletionRequest({
     apiKey,
-    model,
     problemStatement,
     stream: false,
   })
@@ -355,51 +260,36 @@ async function fetchRepairAnalysis({ apiKey, model, problemStatement }) {
 
 export async function streamPmAnalysis(problemStatement, { onBuffer, onPartial, onMeta } = {}) {
   const apiKey = ensureApiKey()
-  const { availableModels, candidateModels } = await getModelPlan(apiKey)
 
-  let lastError = null
+  onMeta?.({
+    activeModel: MODEL_ID,
+    candidateModels: [MODEL_ID],
+    availableModels: [MODEL_ID],
+  })
 
-  for (const model of candidateModels.slice(0, 3)) {
-    try {
-      onMeta?.({
-        activeModel: model,
-        candidateModels,
-        availableModels,
-      })
+  const streamResponse = await startCompletionRequest({
+    apiKey,
+    problemStatement,
+    stream: true,
+  })
 
-      const streamResponse = await startCompletionRequest({
-        apiKey,
-        model,
-        problemStatement,
-        stream: true,
-      })
+  const contentBuffer = await streamContentFromResponse(streamResponse, { onBuffer, onPartial })
+  const finalAnalysis = parsePartialAnalysis(contentBuffer)
 
-      const contentBuffer = await streamContentFromResponse(streamResponse, { onBuffer, onPartial })
-      const finalAnalysis = parsePartialAnalysis(contentBuffer)
-
-      if (hasCompleteAnalysis(finalAnalysis)) {
-        return finalAnalysis
-      }
-
-      const repairedAnalysis = await fetchRepairAnalysis({
-        apiKey,
-        model,
-        problemStatement,
-      })
-
-      if (hasCompleteAnalysis(repairedAnalysis)) {
-        onBuffer?.(JSON.stringify(repairedAnalysis))
-        onPartial?.(repairedAnalysis)
-        return repairedAnalysis
-      }
-
-      throw new Error(`Model "${model}" returned an incomplete structured response.`)
-    } catch (error) {
-      lastError = error
-    }
+  if (hasCompleteAnalysis(finalAnalysis)) {
+    return finalAnalysis
   }
 
-  const fallbackMessage =
-    "PMFrame could not finish the analysis just now. Try again in a moment, or set VITE_GROQ_MODEL to a different text model."
-  throw new Error(lastError instanceof Error ? lastError.message || fallbackMessage : fallbackMessage)
+  const repairedAnalysis = await fetchRepairAnalysis({
+    apiKey,
+    problemStatement,
+  })
+
+  if (hasCompleteAnalysis(repairedAnalysis)) {
+    onBuffer?.(JSON.stringify(repairedAnalysis))
+    onPartial?.(repairedAnalysis)
+    return repairedAnalysis
+  }
+
+  throw new Error(`Model "${MODEL_ID}" returned an incomplete structured response.`)
 }

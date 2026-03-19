@@ -47,13 +47,6 @@ export default function App() {
     [renderable],
   )
   const completedFrameworks = frameworkState.filter((framework) => framework.ready).length
-  const availableTextModelCount = useMemo(
-    () =>
-      modelMeta.availableModels.filter(
-        (modelId) => !/(whisper|prompt-guard|safeguard|orpheus|allam-2)/i.test(modelId),
-      ).length,
-    [modelMeta.availableModels],
-  )
 
   async function handleAnalyze() {
     const trimmedStatement = problemStatement.trim()
@@ -189,16 +182,8 @@ export default function App() {
             <div className="mb-6 border border-black bg-white px-4 py-4">
               <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-black/55">Model Routing</p>
               <p className="mt-2 text-sm leading-6 text-black/75">
-                Using <span className="font-semibold">{modelMeta.activeModel}</span> with structured-output fallback.
+                Using locked model: <span className="font-semibold">{modelMeta.activeModel}</span>.
               </p>
-              <p className="mt-1 text-xs uppercase tracking-[0.22em] text-black/55">
-                {availableTextModelCount} text-capable models available on this key
-              </p>
-              {modelMeta.candidateModels.length > 0 && (
-                <p className="mt-2 text-xs leading-5 text-black/60">
-                  Priority: {modelMeta.candidateModels.slice(0, 3).join(" -> ")}
-                </p>
-              )}
             </div>
           )}
 

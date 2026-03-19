@@ -38,13 +38,6 @@ The app reads your Groq API key from:
 VITE_GROQ_API_KEY=your_key_here
 ```
 
-Optional model overrides:
-
-```bash
-VITE_GROQ_MODEL=llama-3.3-70b-versatile
-VITE_GROQ_MODEL_FALLBACKS=openai/gpt-oss-120b,qwen/qwen3-32b
-```
-
 ## Build for production
 
 ```bash
@@ -67,10 +60,9 @@ The production bundle is generated in `dist/`.
 
 ## What the app sends to Groq
 
-PMFrame makes a streamed request to Groq using model routing with fallback:
+PMFrame makes a streamed request to Groq using:
 
-- Primary model: `VITE_GROQ_MODEL` (or best available preferred text model)
-- Fallback behavior: tries alternate text models available on your Groq key
+- Model: `llama-3.3-70b-versatile`
 - Endpoint: `https://api.groq.com/openai/v1/chat/completions`
 - Output shape: `{ jtbd, journeyMap, prd }`
 
